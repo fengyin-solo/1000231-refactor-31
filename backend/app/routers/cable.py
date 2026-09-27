@@ -1,7 +1,9 @@
-"""电缆线路接口：维护电缆段，覆盖测试绝缘、标记隐患、安排修复等动作。"""
-from __future__ import annotations
+"""电缆线路接口：维护电缆段，覆盖测试绝缘、标记隐患、安排修复等动作。
 
-from typing import Any
+列表、明细、异常入口、整段查看都返回服务层那份共用评估结果对象，
+前端不再各自复刻判定口径。
+"""
+from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -12,7 +14,7 @@ router = APIRouter(prefix="/api/cable", tags=["电缆线路"])
 
 service = CableService()
 
-LIST_FIELDS = ["电缆编号", "电缆型号", "起止位置", "敷设方式", "绝缘电阻", "上次测值", "测试日期", "电缆状态"]
+DISPLAY_COLUMNS = ["电缆编号", "电缆型号", "起止位置", "敷设方式", "绝缘电阻", "测试日期"]
 STATUSES = ["正常运行", "绝缘降低", "待修复", "已修复"]
 
 
@@ -28,6 +30,26 @@ def list_entries(
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
     items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/abnormal", response_model=dict)
+def list_abnormal() -> dict:
+    """异常入口：只返回评估为缺测或连续下降的电缆段。"""
+    items = service.list_abnormal()
+    return {"module": "cable", "total": len(items), "items": items}
+
+
+@router.get("/segment-summary", response_model=dict)
+def segment_summary() -> dict:
+    """整段查看：全部电缆段跑同一套评估，返回结论汇总与逐条结果。"""
+    return service.segment_summary()
+
+
+@router.get("/export")
+def export_entries() -> dict:
+    """导出电缆线路清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "cable", "total": total, "items": items}
 
 
 @router.get("/{entry_id}", response_model=dict)
@@ -56,10 +78,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出电缆线路清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "cable", "total": total, "items": items}
